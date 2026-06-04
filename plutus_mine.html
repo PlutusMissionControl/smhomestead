@@ -1,0 +1,1775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Plutus Mission Control — The Mine</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #07060a; }
+  body { font-family: "Courier New", ui-monospace, SFMono-Regular, Menlo, monospace; -webkit-font-smoothing: none; }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---------- HUD top bar ---------- */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; height: 54px; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px;
+    background: linear-gradient(180deg, rgba(8,7,12,0.96) 0%, rgba(8,7,12,0.78) 70%, rgba(8,7,12,0.0) 100%);
+    color: #e9e2d0; letter-spacing: 1px; user-select: none;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+  }
+  #hud .title { font-size: 18px; font-weight: bold; color: #ffd277;
+    text-shadow: 0 0 10px rgba(255,180,60,0.5), 0 2px 4px #000; }
+  #hud .counts { display: flex; gap: 18px; font-size: 14px; }
+  #hud .counts .seg { display: flex; align-items: center; gap: 6px; }
+  #hud .dot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
+  .c-mining { color: #8fe39a; } .c-resting { color: #9fb6d8; } .c-down { color: #ff5b5b; }
+  #hud .down-active { animation: downpulse 1s ease-in-out infinite; }
+  @keyframes downpulse { 0%,100% { opacity: 1; text-shadow: 0 0 10px #ff2b2b; } 50% { opacity: 0.45; } }
+  #backBtn {
+    background: rgba(255,210,119,0.08); border: 1px solid rgba(255,210,119,0.45);
+    color: #ffd277; font-family: inherit; font-size: 13px; letter-spacing: 1px;
+    padding: 8px 14px; border-radius: 4px; cursor: pointer; transition: all .15s;
+  }
+  #backBtn:hover { background: rgba(255,210,119,0.2); box-shadow: 0 0 14px rgba(255,180,60,0.4); }
+
+  /* ---------- Demo control panel ---------- */
+  #demo {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    background: linear-gradient(0deg, rgba(8,7,12,0.97) 0%, rgba(8,7,12,0.8) 75%, rgba(8,7,12,0) 100%);
+    padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 7px;
+    user-select: none;
+  }
+  #demo .label { font-size: 10px; letter-spacing: 2px; color: #6f6a7d; text-transform: uppercase; }
+  #demo .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; padding: 5px 9px; border-radius: 13px; cursor: pointer;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09);
+    color: #cfc8d8; transition: transform .1s, background .15s; white-space: nowrap;
+  }
+  .chip:hover { transform: translateY(-1px); background: rgba(255,255,255,0.09); }
+  .chip .sdot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
+  .chip .aid { color: #8a8398; font-weight: bold; }
+  .st-idle { color: #9fb6d8; } .st-running { color: #8fe39a; } .st-error { color: #ff5b5b; }
+
+  /* ---------- Floating popup card ---------- */
+  #popup {
+    position: fixed; z-index: 40; display: none; transform: translate(-50%, -100%);
+    width: 218px; padding: 14px 15px 13px;
+    background: linear-gradient(180deg, rgba(24,20,30,0.98), rgba(14,11,18,0.98));
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 9px;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.5);
+    color: #e9e2d0; pointer-events: auto;
+  }
+  #popup:after { /* pointer arrow */
+    content: ''; position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%);
+    border: 9px solid transparent; border-top-color: rgba(14,11,18,0.98); border-bottom: 0;
+  }
+  #popup .pid { font-size: 11px; letter-spacing: 2px; color: #8a8398; }
+  #popup .pname { font-size: 16px; font-weight: bold; margin: 2px 0 9px; }
+  #popup .prow { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; color: #b9b2c6; }
+  #popup .prow .pdot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 7px currentColor; }
+  #popup .pzone { font-size: 11px; color: #8a8398; letter-spacing: 1px; }
+  #reviveBtn {
+    margin-top: 11px; width: 100%; padding: 9px; cursor: pointer; font-family: inherit;
+    font-size: 12px; letter-spacing: 2px; color: #fff; border: none; border-radius: 5px;
+    background: linear-gradient(180deg, #ff5b5b, #c41e1e);
+    box-shadow: 0 0 14px rgba(255,60,60,0.5); animation: revivepulse 1.2s ease-in-out infinite;
+  }
+  #reviveBtn:hover { filter: brightness(1.15); }
+  @keyframes revivepulse { 0%,100% { box-shadow: 0 0 10px rgba(255,60,60,0.4); } 50% { box-shadow: 0 0 22px rgba(255,60,60,0.8); } }
+  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #ffd277; font-size: 14px; letter-spacing: 3px; z-index: 50; background: #07060a; }
+</style>
+</head>
+<body>
+  <div id="loading">⛏ ENTERING THE MINE…</div>
+  <div id="stage"></div>
+
+  <div id="hud">
+    <div class="title">⛏ PLUTUS MINE</div>
+    <div class="counts">
+      <div class="seg c-mining"><span class="dot"></span>MINING:&nbsp;<span id="cMining">0</span></div>
+      <div class="seg c-resting"><span class="dot"></span>RESTING:&nbsp;<span id="cResting">0</span></div>
+      <div class="seg c-down"><span class="dot"></span>DOWN:&nbsp;<span id="cDown">0</span></div>
+    </div>
+    <button id="backBtn">← PLUTUS</button>
+  </div>
+
+  <div id="popup">
+    <div class="pid" id="pId">A00</div>
+    <div class="pname" id="pName">Agent</div>
+    <div class="prow"><span class="pdot" id="pDot"></span><span id="pStatus">idle</span></div>
+    <div class="pzone" id="pZone">ZONE</div>
+    <button id="reviveBtn" style="display:none;">⚕ REVIVE MINER</button>
+  </div>
+
+  <div id="demo">
+    <div class="label">Demo / Test Mode — click an agent to cycle idle → running → error</div>
+    <div class="row" id="demoRow"></div>
+  </div>
+
+<script>
+"use strict";
+(function () {
+
+  // ============================================================
+  //  ZONE + AGENT CONFIG
+  // ============================================================
+  const ZONES = [
+    {
+      key: "revenue", name: "REVENUE MINE",
+      light: 0xffb14d, lightSoft: 0xff9a2e, accent: 0xffd700, outfit: 0x8a5a2b, helmet: 0xffcf42,
+      stoneBase: 0x352a22, stoneTint: 0x4a3a28, floor: 0x2a2018, tool: "pickaxe", particle: "coin",
+      agents: [
+        { id: "A01", name: "Etsy Listing" }, { id: "A02", name: "KDP Publishing" },
+        { id: "A03", name: "POD Brief" }, { id: "A04", name: "AI Services" },
+      ],
+    },
+    {
+      key: "content", name: "CONTENT SHAFT",
+      light: 0x4cc6ff, lightSoft: 0x2a8fd6, accent: 0x7fdcff, outfit: 0x1f3358, helmet: 0x3f7fd6,
+      stoneBase: 0x1e2733, stoneTint: 0x2a3a4d, floor: 0x161d27, tool: "chisel", particle: "scroll",
+      agents: [
+        { id: "A05", name: "Shorts Script" }, { id: "A06", name: "Affiliate Blog" }, { id: "A07", name: "Content Cal" },
+      ],
+    },
+    {
+      key: "ops", name: "OPS TUNNEL",
+      light: 0x53e08a, lightSoft: 0x2faa63, accent: 0x9cffc2, outfit: 0x1f3d2c, helmet: 0x37c46f,
+      stoneBase: 0x1c2620, stoneTint: 0x26352b, floor: 0x141c17, tool: "wrench", particle: "gem",
+      agents: [
+        { id: "A08", name: "Finance Monitor" }, { id: "A09", name: "Customer Ops" }, { id: "A10", name: "SEO Analytics" },
+      ],
+    },
+    {
+      key: "intel", name: "INTEL CAVE",
+      light: 0xb46cff, lightSoft: 0x8a3df0, accent: 0xd9a8ff, outfit: 0x2c1f47, helmet: 0x7b3fd6,
+      stoneBase: 0x241c33, stoneTint: 0x32264a, floor: 0x18122a, tool: "staff", particle: "rune",
+      agents: [
+        { id: "A11", name: "Trend Scout" }, { id: "A12", name: "Research & Opp" }, { id: "A13", name: "Blueprint Build" },
+      ],
+    },
+  ];
+
+  const STATUS_COLOR = { idle: 0x9fb6d8, running: 0x8fe39a, error: 0xff5b5b };
+  const STATUS_HEX = { idle: "#9fb6d8", running: "#8fe39a", error: "#ff5b5b" };
+
+  // Persistent status across resizes/rebuilds
+  const agentStatus = {};
+  ZONES.forEach(z => z.agents.forEach(a => { agentStatus[a.id] = "idle"; }));
+
+  // ============================================================
+  //  PIXI APP
+  // ============================================================
+  const app = new PIXI.Application({
+    resizeTo: window,
+    backgroundColor: 0x07060a,
+    antialias: true,
+    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    autoDensity: true,
+    powerPreference: "high-performance",
+  });
+  document.getElementById("stage").appendChild(app.view);
+
+  // Lower the load on weak devices (e.g. Fire TV Silk) — fewer pixels to push.
+  const LOW_POWER = /Silk|AFT|SmartTV|BRAVIA|Web0S|Tizen/i.test(navigator.userAgent)
+                    || (navigator.hardwareConcurrency || 4) <= 2;
+  if (LOW_POWER) { app.renderer.resolution = 1; }
+
+  // ============================================================
+  //  ROOT CONTAINERS (parallax depth layers)
+  // ============================================================
+  const root = new PIXI.Container();      // shaken for screen-shake
+  app.stage.addChild(root);
+
+  const layerFar = new PIXI.Container();  // far cave wall
+  const layerMid = new PIXI.Container();  // support beams / mid detail
+  const layerNear = new PIXI.Container(); // zones, floor, miners, particles
+  const layerLight = new PIXI.Container(); // light glows (additive)
+  const layerFx = new PIXI.Container();   // top fx: flash, vignette
+  layerLight.blendMode = PIXI.BLEND_MODES.ADD;
+  root.addChild(layerFar, layerMid, layerNear, layerLight, layerFx);
+
+  // White flash overlay (error sequence)
+  const flash = new PIXI.Graphics();
+  let flashAlpha = 0;
+  layerFx.addChild(flash);
+
+  // ============================================================
+  //  TEXTURE HELPERS
+  // ============================================================
+  const texCache = {};
+  function radialGlowTexture(color, key) {
+    const id = "glow_" + (key || color);
+    if (texCache[id]) return texCache[id];
+    const size = 256, c = document.createElement("canvas");
+    c.width = c.height = size;
+    const ctx = c.getContext("2d");
+    const r = size / 2;
+    const g = ctx.createRadialGradient(r, r, 0, r, r, r);
+    const hex = "#" + color.toString(16).padStart(6, "0");
+    g.addColorStop(0, hexA(hex, 1));
+    g.addColorStop(0.25, hexA(hex, 0.65));
+    g.addColorStop(0.6, hexA(hex, 0.18));
+    g.addColorStop(1, hexA(hex, 0));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+    const t = PIXI.Texture.from(c);
+    texCache[id] = t; return t;
+  }
+  function softCircleTexture() {
+    if (texCache.soft) return texCache.soft;
+    const size = 128, c = document.createElement("canvas");
+    c.width = c.height = size;
+    const ctx = c.getContext("2d"), r = size / 2;
+    const g = ctx.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.5, "rgba(255,255,255,0.5)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+    const t = PIXI.Texture.from(c); texCache.soft = t; return t;
+  }
+  function hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  // Deterministic pseudo-noise (no Math.random in render path for stability)
+  function noise1(x) {
+    return (Math.sin(x * 12.9898) * 43758.5453) % 1;
+  }
+  function fbm(x, t) {
+    return Math.sin(x * 1.7 + t) * 0.5 + Math.sin(x * 3.3 + t * 1.7) * 0.3 + Math.sin(x * 7.1 + t * 0.6) * 0.2;
+  }
+  let seed = 1337;
+  function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+
+  // Easing — smooth, non-linear motion for the death sequence & particles
+  function easeIn(k) { k = Math.max(0, Math.min(1, k)); return k * k; }
+  function easeOut(k) { k = Math.max(0, Math.min(1, k)); return 1 - (1 - k) * (1 - k); }
+  function easeInOut(k) { k = Math.max(0, Math.min(1, k)); return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; }
+
+  // ============================================================
+  //  WORLD STATE
+  // ============================================================
+  let W = app.screen.width, H = app.screen.height;
+  let miners = [];           // all 13 miner objects
+  let torches = [];          // light sources for flicker
+  let zoneParticles = [];    // per-zone ambient particle pools
+  let flameParticles = [];   // torch flames
+  let sparkles = [];         // running-miner sparkle pool (global)
+  let pulseRings = [];       // error pulse rings
+  let trailParticles = [];   // skull red trail
+  let impactParticles = [];  // pickaxe-strike sparks & dust
+  let conveyors = [];        // ops conveyor-belt systems
+  let energyBeams = [];      // intel hand→crystal energy motes
+  let time = 0;
+  let shake = { t: 0, mag: 0 };
+  let pointer = { x: 0, y: 0 };
+
+  // 2x2 grid layout — each zone gets its own geometry { zx,zy,w,h, ceilY,floorY }
+  // (zx,zy = absolute top-left of the cell; ceilY/floorY are LOCAL to the cell container)
+  const TOP_MARGIN = 60;     // clears the HUD bar
+  const BOT_MARGIN = 92;     // clears the demo panel
+  let PWALL = 70;            // vertical stone divider thickness
+  let HWALL = 54;            // horizontal stone divider thickness
+  function computeGrid() {
+    W = app.screen.width; H = app.screen.height;
+    PWALL = Math.max(54, Math.min(90, W * 0.05));
+    HWALL = Math.max(42, Math.min(70, H * 0.05));
+    const fieldX = 0, fieldY = TOP_MARGIN;
+    const fieldW = W, fieldH = H - TOP_MARGIN - BOT_MARGIN;
+    const colW = (fieldW - PWALL) / 2;
+    const rowH = (fieldH - HWALL) / 2;
+    ZONES.forEach((z, i) => {
+      const col = i % 2, row = (i / 2) | 0;
+      const zx = fieldX + col * (colW + PWALL);
+      const zy = fieldY + row * (rowH + HWALL);
+      z.geom = {
+        zx, zy, w: colW, h: rowH,
+        ceilY: 22,
+        floorY: rowH - Math.max(34, rowH * 0.13),
+      };
+    });
+    return { fieldX, fieldY, fieldW, fieldH, colW, rowH };
+  }
+
+  // ============================================================
+  //  BUILD THE WORLD
+  // ============================================================
+  function build() {
+    // wipe
+    [layerFar, layerMid, layerNear, layerLight].forEach(l => l.removeChildren());
+    miners = []; torches = []; zoneParticles = []; flameParticles = [];
+    sparkles = []; pulseRings = []; trailParticles = [];
+    impactParticles = []; conveyors = []; energyBeams = [];
+
+    seed = 1337;
+    const grid = computeGrid();
+
+    flash.clear();
+    flash.beginFill(0xffffff).drawRect(0, 0, W, H).endFill();
+    flash.alpha = 0;
+
+    buildBackWall();
+    ZONES.forEach((z, i) => buildZone(z, i));
+    buildFramework(grid);   // thick stone pillars between/around the 4 rooms
+    buildVignette();
+
+    // reapply persisted statuses instantly (no death replay on resize)
+    miners.forEach(m => applyStatus(m, agentStatus[m.id], false));
+    buildDemoPanel();
+  }
+
+  // ============================================================
+  //  STONE TEXTURE HELPERS
+  // ============================================================
+  function shade(c, f) {
+    const r = Math.min(255, ((c >> 16) & 255) * f) | 0;
+    const g = Math.min(255, ((c >> 8) & 255) * f) | 0;
+    const b = Math.min(255, (c & 255) * f) | 0;
+    return (r << 16) | (g << 8) | b;
+  }
+  // Draw irregular mortared stone blocks into rect (x,y,w,h). Dark base shows through
+  // the gaps between rounded blocks → reads as mortar. Adds cracks + tonal variation.
+  function drawStone(g, x, y, w, h, base, tint, blockH) {
+    blockH = blockH || 26;
+    g.beginFill(shade(base, 0.55)).drawRect(x, y, w, h).endFill();   // dark mortar bed
+    const rows = Math.ceil(h / blockH);
+    for (let r = 0; r < rows; r++) {
+      const by = y + r * blockH;
+      const baseBW = 30 + rnd() * 26;
+      let bx = x - (r % 2) * baseBW * 0.5;
+      while (bx < x + w) {
+        const cw = baseBW * (0.7 + rnd() * 0.6);
+        const rx = Math.max(x, bx), rw = Math.min(x + w, bx + cw) - rx;
+        const ry = Math.max(y, by), rh = Math.min(y + h, by + blockH) - ry;
+        if (rw > 2 && rh > 2) {
+          const pick = rnd() > 0.5 ? tint : base;
+          const col = shade(pick, 0.78 + rnd() * 0.5);
+          g.beginFill(col).drawRoundedRect(rx + 1.5, ry + 1.5, rw - 3, rh - 3, 2.5).endFill();
+          g.beginFill(0xffffff, 0.045).drawRect(rx + 1.5, ry + 1.5, rw - 3, 1.6).endFill();   // top edge light
+          g.beginFill(0x000000, 0.18).drawRect(rx + 1.5, ry + rh - 2.6, rw - 3, 1.6).endFill(); // bottom shade
+          if (rnd() > 0.86) {  // crack
+            g.lineStyle(1, 0x000000, 0.38);
+            let cxp = rx + rw * (0.25 + rnd() * 0.5), cyp = ry + 2;
+            g.moveTo(cxp, cyp);
+            for (let s = 0; s < 2; s++) { cxp += (rnd() - 0.5) * 9; cyp += rh * 0.5; g.lineTo(cxp, cyp); }
+            g.lineStyle(0);
+          }
+        }
+        bx += cw;
+      }
+    }
+  }
+
+  // ---- Far back wall: dark gradient behind the whole framework ----
+  function buildBackWall() {
+    const g = new PIXI.Graphics();
+    g.beginFill(0x09080e).drawRect(0, 0, W, H).endFill();
+    layerFar.addChild(g);
+    const strata = new PIXI.Graphics();
+    for (let i = 0; i < 8; i++) {
+      const y = (H * i) / 8;
+      strata.beginFill(0x14101c, 0.45 - i * 0.04).drawRect(0, y, W, 26).endFill();
+    }
+    strata.alpha = 0.6;
+    layerFar.addChild(strata);
+    layerFar._parallax = 0.25;
+  }
+
+  // ============================================================
+  //  STONE FRAMEWORK — thick textured pillars between the 4 rooms
+  // ============================================================
+  function buildFramework(grid) {
+    const g = new PIXI.Graphics();
+    const base = 0x2a2330, tint = 0x39314a;
+    const x0 = 0, y0 = grid.fieldY, fw = W, fh = grid.fieldH;
+    const vx = grid.colW, vw = PWALL;                 // vertical divider
+    const hy = y0 + grid.rowH, hh = HWALL;            // horizontal divider
+    // outer frame (top, bottom, sides) — part of the stone shell
+    const ob = 14;
+    drawStone(g, x0, y0 - ob, fw, ob, base, tint, 22);                 // top lintel
+    drawStone(g, x0, y0 + fh, fw, ob, base, tint, 22);                 // bottom sill
+    drawStone(g, x0 - ob, y0 - ob, ob, fh + ob * 2, base, tint, 26);   // left jamb
+    drawStone(g, fw - 0, y0 - ob, ob, fh + ob * 2, base, tint, 26);    // right jamb (drawn off-edge for depth)
+    // vertical center pillar
+    drawStone(g, vx, y0 - ob, vw, fh + ob * 2, base, tint, 28);
+    // horizontal center wall
+    drawStone(g, x0, hy, fw, hh, base, tint, 24);
+    // bevel highlights along inner edges of the pillars
+    g.beginFill(0x4a4258, 0.4)
+      .drawRect(vx, y0, 3, fh).drawRect(vx + vw - 3, y0, 3, fh)
+      .drawRect(x0, hy, fw, 3).drawRect(x0, hy + hh - 3, fw, 3).endFill();
+    g.beginFill(0x000000, 0.35)
+      .drawRect(vx - 2, y0, 2, fh).drawRect(vx + vw, y0, 2, fh).endFill();
+    // chunky rivets at the pillar crossing
+    const cxs = vx + vw / 2, cys = hy + hh / 2;
+    g.beginFill(0x15121c).drawCircle(cxs, cys, 9).endFill();
+    g.beginFill(0x5a5170, 0.6).drawCircle(cxs - 2, cys - 2, 3).endFill();
+    layerMid.addChild(g);
+    layerMid._parallax = 0.55;
+  }
+
+  // ---- jagged rocky ceiling for a single room (local coords inside zone container) ----
+  function drawZoneCeiling(g, geom, z) {
+    const w = geom.w, cy = geom.ceilY;
+    g.beginFill(0x07060c);
+    g.moveTo(0, 0); g.lineTo(w, 0); g.lineTo(w, cy);
+    const step = Math.max(18, w / 14);
+    for (let x = w; x >= 0; x -= step) {
+      const hh = cy - 4 - Math.abs(fbm(x * 0.03 + geom.zx, 2.1)) * 16 - rnd() * 8;
+      g.lineTo(x, hh);
+    }
+    g.lineTo(0, cy); g.closePath(); g.endFill();
+    // stalactites
+    for (let i = 0; i < 3; i++) {
+      const x = 20 + rnd() * (w - 40), len = 10 + rnd() * 22, ww = 5 + rnd() * 6;
+      g.beginFill(0x07060c).moveTo(x - ww, cy - 2).lineTo(x + ww, cy - 2).lineTo(x, cy - 2 + len).closePath().endFill();
+    }
+  }
+
+  // ---- rocky uneven floor top edge for a single room ----
+  function drawZoneFloorRock(g, geom, z) {
+    const w = geom.w, fy = geom.floorY, h = geom.h;
+    // bumpy top contour of the floor
+    g.beginFill(z.floor);
+    g.moveTo(0, h); g.lineTo(0, fy + 2);
+    const step = Math.max(16, w / 16);
+    for (let x = 0; x <= w; x += step) {
+      const yy = fy + Math.sin(x * 0.07 + geom.zx) * 3 - rnd() * 4;
+      g.lineTo(x, yy);
+    }
+    g.lineTo(w, h); g.closePath().endFill();
+    // rubble rocks on the ground
+    for (let i = 0; i < 7; i++) {
+      const rx = rnd() * w, ry = fy + 6 + rnd() * (h - fy - 8), rr = 2 + rnd() * 5;
+      g.beginFill(shade(z.floor, 1.5 + rnd()), 0.7).drawCircle(rx, ry, rr).endFill();
+      g.beginFill(0x000000, 0.25).drawEllipse(rx, ry + rr * 0.7, rr, rr * 0.4).endFill();
+    }
+  }
+
+  function buildVignette() {
+    if (texCache.vig) layerFx.removeChild(texCache.vig);
+    const c = document.createElement("canvas");
+    c.width = 16; c.height = 16;
+    const tex = radialGlowTexture(0x000000, "vigBlack"); // unused; build manual
+    const s = new PIXI.Graphics();
+    // four edge gradients approximated by overlay rectangles
+    const v = new PIXI.Sprite(softCircleTexture());
+    // Simpler: dark frame
+    const frame = new PIXI.Graphics();
+    const edge = Math.min(W, H) * 0.5;
+    frame.beginFill(0x000000, 0.0);
+    layerFx.addChild(frame);
+    // radial dark vignette via large soft sprite inverted
+    const vg = makeVignetteSprite();
+    layerFx.addChildAt(vg, layerFx.getChildIndex(flash)); // behind flash
+  }
+
+  function makeVignetteSprite() {
+    const id = "vig_" + W + "_" + H;
+    const c = document.createElement("canvas");
+    c.width = Math.max(8, Math.round(W / 4)); c.height = Math.max(8, Math.round(H / 4));
+    const ctx = c.getContext("2d");
+    const g = ctx.createRadialGradient(c.width / 2, c.height * 0.46, c.width * 0.1,
+                                       c.width / 2, c.height * 0.5, c.width * 0.62);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(0.7, "rgba(0,0,0,0.18)");
+    g.addColorStop(1, "rgba(5,4,9,0.82)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, c.width, c.height);
+    const s = new PIXI.Sprite(PIXI.Texture.from(c));
+    s.width = W; s.height = H;
+    return s;
+  }
+
+  // ============================================================
+  //  ZONE BUILDER
+  // ============================================================
+  function buildZone(z, idx) {
+    const G = z.geom;
+    const zc = new PIXI.Container();
+    zc.x = G.zx; zc.y = G.zy;
+    // clip room contents to the cell so stone never bleeds across pillars
+    const mask = new PIXI.Graphics();
+    mask.beginFill(0xffffff).drawRect(0, 0, G.w, G.h).endFill();
+    zc.addChild(mask); zc.mask = mask;
+    layerNear.addChild(zc);
+    z._zc = zc;
+
+    // --- rough mortared stone back wall ---
+    const stone = new PIXI.Graphics();
+    drawStone(stone, 0, G.ceilY - 6, G.w, G.h - G.ceilY + 6, z.stoneBase, z.stoneTint, 28);
+    zc.addChild(stone);
+
+    // --- jagged rocky ceiling over the room ---
+    const ceil = new PIXI.Graphics();
+    drawZoneCeiling(ceil, G, z);
+    zc.addChild(ceil);
+
+    // --- zone-specific wall decor (ore veins / tablets / pipes / crystals) ---
+    buildZoneDecor(z, zc);
+
+    // --- rocky floor ---
+    const floor = new PIXI.Graphics();
+    drawZoneFloorRock(floor, G, z);
+    zc.addChild(floor);
+    buildFloorDetail(z, floor);
+
+    // --- support beams (mid layer for parallax) ---
+    buildBeams(z);
+
+    // --- torch / lantern / industrial light source ---
+    buildLight(z, zc);
+
+    // --- name plate ---
+    buildNamePlate(z, zc);
+
+    // --- ambient particles pool ---
+    initZoneParticles(z);
+
+    // --- miners ---
+    const n = z.agents.length;
+    const S = Math.max(0.62, Math.min(1.0, (G.h / 430)));
+    z.agents.forEach((a, i) => {
+      const localX = G.w * ((i + 1) / (n + 1));
+      const m = buildMiner(z, a, localX, G.floorY, i, S);
+      // shadow rides in the clipped zone container at local coords
+      m.shadow.x = localX; m.shadow.y = G.floorY + 1;
+      zc.addChild(m.shadow);
+      // miner body sits in layerNear at absolute coords (above masks, clean popups)
+      m.container.x = G.zx + localX; m.container.y = G.zy + G.floorY;
+      layerNear.addChild(m.container);
+      m._homeX = m.container.x; m._homeLocalX = localX;
+      m._floorAbsY = G.zy + G.floorY;
+      miners.push(m);
+    });
+  }
+
+  function buildFloorDetail(z, g) {
+    const G = z.geom, w = G.w, fy = G.floorY, h = G.h;
+    if (z.key === "revenue") {
+      for (let i = 0; i < 22; i++) g.beginFill(z.accent, 0.5 + rnd() * 0.4)
+        .drawCircle(rnd() * w, fy + 6 + rnd() * (h - fy - 8), 1 + rnd() * 1.6).endFill();
+    } else if (z.key === "content") {
+      for (let i = 0; i < 5; i++) g.beginFill(0x000000, 0.25)
+        .drawRect(rnd() * w, fy + 8 + rnd() * 16, 24 + rnd() * 50, 2).endFill();
+    } else if (z.key === "ops") {
+      // metal grating with green glow underneath
+      g.beginFill(z.lightSoft, 0.16).drawRect(0, fy, w, h - fy).endFill();
+      for (let x = 0; x < w; x += 15) g.beginFill(0x0c120e, 0.85).drawRect(x, fy + 4, 8, h - fy - 5).endFill();
+      g.beginFill(0x2a3a30).drawRect(0, fy, w, 3).endFill();
+    } else {
+      for (let i = 0; i < 9; i++) {
+        const vx = rnd() * w, vy = fy + 8 + rnd() * (h - fy - 10);
+        g.beginFill(z.light, 0.35 + rnd() * 0.3).drawPolygon([vx, vy, vx + 6, vy + 10, vx - 5, vy + 9]).endFill();
+      }
+    }
+  }
+
+  function buildZoneDecor(z, zc) {
+    const g = new PIXI.Graphics();
+    const G = z.geom, w = G.w;
+    const top = G.ceilY + 8, bot = G.floorY - 8;
+    if (z.key === "revenue") {
+      // gold ore veins — concentrated toward the RIGHT wall the miners swing at
+      for (let i = 0; i < 8; i++) {
+        const rightBias = i < 5;
+        let x = rightBias ? (w * 0.6 + rnd() * (w * 0.36)) : (20 + rnd() * (w - 40));
+        let y = top + rnd() * (bot - top);
+        g.lineStyle(2 + rnd() * 2.5, z.accent, 0.6);
+        g.moveTo(x, y);
+        for (let s = 0; s < 4; s++) { x += (rnd() - 0.3) * 34; y += 10 + rnd() * 18; g.lineTo(x, y); }
+        g.lineStyle(0);
+        for (let k = 0; k < 3; k++) g.beginFill(z.accent, 0.8).drawCircle(x + (rnd() - 0.5) * 26, y - rnd() * 26, 1.5 + rnd() * 2.5).endFill();
+      }
+      // bright ore seam on the right wall (impact target)
+      g.beginFill(z.accent, 0.5).drawRoundedRect(w - 16, top, 12, bot - top, 4).endFill();
+      for (let k = 0; k < 6; k++) g.beginFill(0xfff2c0, 0.7).drawCircle(w - 10, top + 10 + rnd() * (bot - top - 20), 2 + rnd() * 2).endFill();
+    } else if (z.key === "content") {
+      // carved runes
+      g.lineStyle(2, z.light, 0.4);
+      for (let i = 0; i < 6; i++) { const x = 24 + rnd() * (w - 48), y = top + rnd() * (bot - top - 40); drawRune(g, x, y, 10 + rnd() * 6); }
+      g.lineStyle(0);
+      // large stone writing tablet built into the wall — one per miner, on their right
+      const n = z.agents.length;
+      for (let i = 0; i < n; i++) {
+        const mxL = w * ((i + 1) / (n + 1));
+        const tx = mxL + 18, ty = bot - 88;
+        const tw = 30, th = 54;
+        g.beginFill(shade(z.stoneTint, 1.2)).lineStyle(2, z.light, 0.5).drawRoundedRect(tx, ty, tw, th, 3).endFill();
+        g.lineStyle(0);
+        g.beginFill(0x0b1622, 0.6).drawRoundedRect(tx + 3, ty + 3, tw - 6, th - 6, 2).endFill();
+        // ink marks already written
+        g.lineStyle(1.4, z.accent, 0.7);
+        for (let r = 0; r < 4; r++) { const ly = ty + 9 + r * 11; g.moveTo(tx + 6, ly).lineTo(tx + 6 + rnd() * (tw - 14), ly); }
+        g.lineStyle(0);
+      }
+    } else if (z.key === "ops") {
+      // industrial metal pipes
+      g.lineStyle(8, 0x2c3a30, 1);
+      g.moveTo(8, top + 24).lineTo(w - 10, top + 24);
+      g.lineStyle(6, 0x223028, 1);
+      g.moveTo(w - 26, top + 24).lineTo(w - 26, bot - 28);
+      g.moveTo(18, top + 50).lineTo(18, bot - 50);
+      g.lineStyle(0);
+      // pipe joints
+      [[8, top + 24], [w - 26, top + 24], [w - 26, bot - 28], [18, top + 50]].forEach(p => {
+        g.beginFill(0x3a4a40).drawCircle(p[0], p[1], 6).endFill();
+        g.beginFill(0x1a221c).drawCircle(p[0], p[1], 2.5).endFill();
+      });
+      // pressure gauges
+      for (let i = 0; i < 3; i++) {
+        const gx = 44 + i * (w * 0.26), gy = top + 50;
+        g.beginFill(0x10160f).lineStyle(2, 0x3a5a44).drawCircle(gx, gy, 11).endFill();
+        g.lineStyle(2, z.light, 0.9); g.moveTo(gx, gy).lineTo(gx + 6 * Math.cos(i), gy - 6 * Math.sin(i + 1)); g.lineStyle(0);
+        g.beginFill(z.light, 0.8).drawCircle(gx, gy, 1.5).endFill();
+      }
+      zc.addChild(g);
+      buildConveyor(z, zc);   // the animated belt system (adds its own children)
+      return;
+    } else {
+      // intel: ancient runes + crystal formations on the walls
+      g.lineStyle(2, z.light, 0.35);
+      for (let i = 0; i < 6; i++) { const x = 24 + rnd() * (w - 48), y = top + rnd() * (bot - top - 30); drawRune(g, x, y, 11 + rnd() * 7); }
+      g.lineStyle(0);
+      for (let i = 0; i < 8; i++) {
+        const cx = 18 + rnd() * (w - 36), cy = top + 16 + rnd() * (bot - top - 36);
+        const cw = 4 + rnd() * 6, ch = 14 + rnd() * 28, up = rnd() > 0.5 ? -1 : 1;
+        g.beginFill(z.lightSoft, 0.75).drawPolygon([cx, cy, cx + cw, cy + up * 5, cx + cw * 0.4, cy + up * ch, cx - cw * 0.4, cy + up * ch, cx - cw, cy + up * 5]).endFill();
+        g.beginFill(z.accent, 0.9).drawPolygon([cx, cy, cx + cw * 0.5, cy + up * 4, cx, cy + up * ch * 0.7, cx - cw * 0.5, cy + up * 4]).endFill();
+      }
+      // big focus crystals on the floor — one in front of each intel miner (their right)
+      const n = z.agents.length;
+      z._crystals = [];
+      for (let i = 0; i < n; i++) {
+        const mxL = w * ((i + 1) / (n + 1));
+        const ccx = mxL + 26, ccy = G.floorY - 6;
+        const cg = new PIXI.Graphics();
+        cg.beginFill(z.lightSoft, 0.9).drawPolygon([0, -34, 9, -10, 5, 4, -5, 4, -9, -10]).endFill();
+        cg.beginFill(z.accent, 0.95).drawPolygon([0, -34, 4, -12, 0, 2, -4, -12]).endFill();
+        const glow = new PIXI.Sprite(radialGlowTexture(z.light, z.key));
+        glow.anchor.set(0.5); glow.width = glow.height = 60; glow.alpha = 0.45;
+        glow.blendMode = PIXI.BLEND_MODES.ADD; glow.y = -14;
+        cg.addChildAt(glow, 0);
+        cg.x = ccx; cg.y = ccy; cg._glow = glow;
+        zc.addChild(cg);
+        z._crystals.push({ g: cg, glow, localX: ccx, localY: ccy - 14 });
+      }
+    }
+    zc.addChild(g);
+  }
+
+  // ============================================================
+  //  CONVEYOR BELT SYSTEM (Ops Tunnel)
+  // ============================================================
+  function buildConveyor(z, zc) {
+    const G = z.geom;
+    const beltX = 6, beltW = G.w - 12, beltY = G.floorY - 20, beltH = 18;
+    // frame + rollers
+    const frame = new PIXI.Graphics();
+    frame.beginFill(0x161d18).drawRoundedRect(beltX - 2, beltY - 2, beltW + 4, beltH + 4, 5).endFill();
+    frame.beginFill(0x2a3a30).drawCircle(beltX + 8, beltY + beltH / 2, beltH / 2).drawCircle(beltX + beltW - 8, beltY + beltH / 2, beltH / 2).endFill();
+    frame.beginFill(0x0d120e).drawCircle(beltX + 8, beltY + beltH / 2, 3).drawCircle(beltX + beltW - 8, beltY + beltH / 2, 3).endFill();
+    // support legs
+    frame.beginFill(0x202820).drawRect(beltX + 14, beltY + beltH, 6, G.h - (beltY + beltH)).drawRect(beltX + beltW - 20, beltY + beltH, 6, G.h - (beltY + beltH)).endFill();
+    zc.addChild(frame);
+
+    // moving stripe surface (redrawn each frame)
+    const stripes = new PIXI.Graphics();
+    zc.addChild(stripes);
+
+    // collection bin/cart at the right end
+    const cart = new PIXI.Graphics();
+    const cartW = 34, cartH = 26, cartX = beltX + beltW - 6, cartY = G.floorY - 4;
+    cart.beginFill(0x39312a).lineStyle(2, 0x554a3e).drawRoundedRect(0, -cartH, cartW, cartH, 3).endFill();
+    cart.lineStyle(0);
+    cart.beginFill(0x1a1510).drawRect(3, -cartH + 3, cartW - 6, cartH - 6).endFill();
+    cart.beginFill(0x15110c).drawCircle(7, 2, 5).drawCircle(cartW - 7, 2, 5).endFill();   // wheels
+    cart.x = cartX; cart.y = cartY;
+    const cartFill = new PIXI.Graphics();
+    cart.addChild(cartFill);
+    zc.addChild(cart);
+
+    // gems riding the belt
+    const gems = [];
+    const conv = {
+      z, stripes, scroll: 0, beltX, beltW, beltY, beltH,
+      gems, gemTimer: 600, speed: 0.05,
+      cart, cartFill, cartX, cartY, cartW, cartH, level: 0,
+      gemColors: [z.accent, z.light, 0xffffff, shade(z.accent, 0.8)],
+      zc,
+    };
+    conveyors.push(conv);
+  }
+
+  function makeBeltGem(conv) {
+    const z = conv.z;
+    const g = new PIXI.Graphics();
+    const col = conv.gemColors[(rnd() * conv.gemColors.length) | 0];
+    const s = 0.8 + rnd() * 0.5;
+    g.beginFill(col).lineStyle(1, 0xffffff, 0.6).drawPolygon([0, -6 * s, 5 * s, -1 * s, 3 * s, 6 * s, -3 * s, 6 * s, -5 * s, -1 * s]).endFill();
+    g.lineStyle(0).beginFill(0xffffff, 0.5).drawPolygon([0, -6 * s, 2 * s, -2 * s, -2 * s, -2 * s]).endFill();
+    conv.zc.addChild(g);
+    return g;
+  }
+
+  function drawRune(g, x, y, s) {
+    const t = Math.floor(rnd() * 4);
+    if (t === 0) { g.moveTo(x, y).lineTo(x, y + s).moveTo(x - s * 0.4, y + s * 0.4).lineTo(x + s * 0.4, y + s * 0.4); }
+    else if (t === 1) { g.moveTo(x - s * 0.4, y).lineTo(x + s * 0.4, y).lineTo(x, y + s).closePath(); }
+    else if (t === 2) { g.moveTo(x, y).lineTo(x + s * 0.5, y + s * 0.5).lineTo(x, y + s).lineTo(x - s * 0.5, y + s * 0.5).closePath(); }
+    else { g.moveTo(x - s * 0.4, y).lineTo(x + s * 0.4, y).moveTo(x, y).lineTo(x, y + s).moveTo(x - s * 0.4, y + s).lineTo(x + s * 0.4, y + s); }
+  }
+
+  function buildBeams(z) {
+    const G = z.geom;
+    const g = new PIXI.Graphics();
+    const beamW = 14, top = G.zy + G.ceilY + 2, floorAbs = G.zy + G.floorY;
+    const lx = G.zx + G.w * 0.10, rx = G.zx + G.w * 0.90;
+    [lx, rx].forEach(bx => {
+      g.beginFill(0x2a1d12).drawRect(bx - beamW / 2, top, beamW, floorAbs - top).endFill();
+      g.beginFill(0x3a2a1c, 0.6).drawRect(bx - beamW / 2, top, 4, floorAbs - top).endFill();
+      for (let y = top + 18; y < floorAbs; y += 60) g.beginFill(0x15100a).drawCircle(bx, y, 2.2).endFill();
+    });
+    g.beginFill(0x2a1d12).drawRect(lx - beamW / 2, top, rx - lx + beamW, beamW).endFill();
+    g.beginFill(0x3a2a1c, 0.5).drawRect(lx, top, rx - lx, 3).endFill();
+    g.lineStyle(6, 0x241810, 1);
+    g.moveTo(lx, top + 24).lineTo(rx, top + 70);
+    g.moveTo(rx, top + 24).lineTo(lx, top + 70);
+    g.lineStyle(0);
+    layerMid.addChild(g);
+  }
+
+  // ---- light source: torch (rev), lantern (content/intel), industrial (ops) ----
+  function buildLight(z, zc) {
+    const G = z.geom;
+    const lx = G.zx + G.w * 0.5;
+    const ly = G.zy + G.ceilY + (G.floorY - G.ceilY) * 0.26;
+
+    const glow = new PIXI.Sprite(radialGlowTexture(z.light, z.key));
+    glow.anchor.set(0.5);
+    const gs = G.w * 1.7;
+    glow.width = gs; glow.height = gs;
+    glow.x = lx; glow.y = G.zy + G.floorY - (G.floorY - G.ceilY) * 0.32;
+    glow.alpha = 0.42;
+    layerLight.addChild(glow);
+
+    const src = new PIXI.Sprite(radialGlowTexture(z.lightSoft, z.key + "_s"));
+    src.anchor.set(0.5);
+    src.width = G.w * 0.8; src.height = G.w * 0.8;
+    src.x = lx; src.y = ly;
+    src.alpha = 0.7;
+    layerLight.addChild(src);
+
+    // physical fixture (drawn in the clipped room, local coords)
+    const fix = new PIXI.Graphics();
+    const flx = G.w * 0.5, fly = G.ceilY + (G.floorY - G.ceilY) * 0.26;
+    if (z.key === "revenue") {
+      fix.beginFill(0x2a1d12).drawRect(flx - 4, fly, 8, 40).endFill();
+      fix.beginFill(0x4a3320).drawRect(flx - 12, fly + 38, 24, 6).endFill();
+    } else if (z.key === "ops") {
+      fix.beginFill(0x202820).drawRoundedRect(flx - 16, fly - 12, 32, 18, 4).endFill();
+      fix.beginFill(z.light, 0.5).drawRoundedRect(flx - 12, fly - 2, 24, 6, 3).endFill();
+    } else {
+      fix.lineStyle(2, 0x3a3346); fix.moveTo(flx, G.ceilY + 4).lineTo(flx, fly - 12); fix.lineStyle(0);
+      fix.beginFill(0x2a2436).drawRoundedRect(flx - 11, fly - 12, 22, 26, 4).endFill();
+      fix.beginFill(z.light, 0.55).drawRoundedRect(flx - 7, fly - 8, 14, 18, 3).endFill();
+    }
+    zc.addChild(fix);
+
+    const core = new PIXI.Sprite(softCircleTexture());
+    core.anchor.set(0.5); core.tint = z.accent;
+    core.width = core.height = 30; core.x = lx; core.y = ly;
+    core.blendMode = PIXI.BLEND_MODES.ADD;
+    layerLight.addChild(core);
+
+    const torch = { glow, src, core, baseGlow: glow.alpha, baseSrc: src.alpha, x: lx, y: ly, z, phase: rnd() * 100 };
+    torches.push(torch);
+
+    const flameColors = [z.accent, z.light, 0xffffff];
+    const flameN = LOW_POWER ? 5 : 8;
+    for (let i = 0; i < flameN; i++) {
+      const f = new PIXI.Sprite(softCircleTexture());
+      f.anchor.set(0.5); f.blendMode = PIXI.BLEND_MODES.ADD;
+      f.tint = flameColors[i % flameColors.length];
+      layerLight.addChild(f);
+      flameParticles.push({ s: f, x: lx, y: ly, base: { x: lx, y: ly }, life: rnd(), seed: rnd() * 100, z });
+    }
+  }
+
+  function buildNamePlate(z, zc) {
+    const G = z.geom;
+    const plate = new PIXI.Container();
+    const w = Math.min(G.w * 0.72, 230), h = 28;
+    const g = new PIXI.Graphics();
+    g.beginFill(0x14101a, 0.94).lineStyle(2, z.light, 0.5).drawRoundedRect(-w / 2, -h / 2, w, h, 5).endFill();
+    g.beginFill(0x000000, 0.3).drawRoundedRect(-w / 2 + 3, -h / 2 + 3, w - 6, h - 6, 4).endFill();
+    g.lineStyle(0);
+    g.beginFill(z.light, 0.6).drawCircle(-w / 2 + 9, 0, 2).drawCircle(w / 2 - 9, 0, 2).endFill();
+    plate.addChild(g);
+    const txt = new PIXI.Text(z.name, {
+      fontFamily: "Courier New, monospace", fontSize: 13, fontWeight: "bold",
+      fill: z.accent, letterSpacing: 2, dropShadow: true, dropShadowColor: 0x000000,
+      dropShadowBlur: 3, dropShadowDistance: 1,
+    });
+    txt.anchor.set(0.5); plate.addChild(txt);
+    plate.x = G.w / 2; plate.y = G.ceilY + 16;
+    plate.zIndex = 50;
+    zc.addChild(plate);
+  }
+
+  // ============================================================
+  //  AMBIENT PARTICLES (zone specific)
+  // ============================================================
+  function initZoneParticles(z) {
+    const pool = [];
+    const n = LOW_POWER ? 6 : 8;
+    const cont = new PIXI.Container();
+    z._zc.addChild(cont);   // clipped to the room
+    for (let i = 0; i < n; i++) {
+      const g = makeParticleGraphic(z);
+      cont.addChild(g);
+      pool.push(spawnParticle({ g, z, geom: z.geom }, true));
+    }
+    zoneParticles.push({ z, pool, cont });
+  }
+
+  function makeParticleGraphic(z) {
+    const g = new PIXI.Graphics();
+    if (z.particle === "coin") {
+      g.beginFill(z.accent).lineStyle(1, 0xfff2c0, 0.8).drawCircle(0, 0, 6).endFill();
+      g.lineStyle(0).beginFill(0xfff6d0, 0.8).drawCircle(-1.5, -1.5, 1.6).endFill();
+      g.lineStyle(1.4, 0x8a6a10, 0.9).moveTo(0, -3.4).lineTo(0, 3.4);
+    } else if (z.particle === "scroll") {
+      g.beginFill(0xe8dcc0).drawRoundedRect(-4, -6, 8, 12, 2).endFill();
+      g.beginFill(0xc9b48a).drawRect(-4, -6, 8, 2).drawRect(-4, 4, 8, 2).endFill();
+      g.lineStyle(0.8, 0x9a8560, 0.8).moveTo(-2.5, -1).lineTo(2.5, -1).moveTo(-2.5, 1.5).lineTo(2.5, 1.5);
+    } else if (z.particle === "gem") {
+      g.beginFill(z.accent).lineStyle(1, 0xffffff, 0.7).drawPolygon([0, -7, 5, -1, 3, 7, -3, 7, -5, -1]).endFill();
+      g.lineStyle(0).beginFill(0xffffff, 0.5).drawPolygon([0, -7, 2, -2, -2, -2]).endFill();
+    } else {
+      // rune symbol with glow
+      g.lineStyle(2, z.accent, 1);
+      g.moveTo(0, -6).lineTo(0, 6).moveTo(-4, -2).lineTo(4, -2).moveTo(-3, 4).lineTo(3, 4);
+      g.lineStyle(0);
+      const glow = new PIXI.Sprite(radialGlowTexture(z.light, z.key));
+      glow.anchor.set(0.5); glow.width = glow.height = 26; glow.alpha = 0.5;
+      glow.blendMode = PIXI.BLEND_MODES.ADD;
+      g.addChildAt(glow, 0);
+    }
+    return g;
+  }
+
+  function spawnParticle(p, initial) {
+    const G = p.geom;
+    p.x = 14 + rnd() * (G.w - 28);
+    p.y = G.floorY - 4 - (initial ? rnd() * (G.floorY - G.ceilY - 24) : 0);
+    p.vy = 0.18 + rnd() * 0.34;
+    p.vx = (rnd() - 0.5) * 0.25;
+    p.rot = rnd() * Math.PI * 2;
+    p.vrot = (rnd() - 0.5) * 0.03;
+    p.sway = rnd() * Math.PI * 2;
+    p.swayAmp = 0.3 + rnd() * 0.7;
+    p.scale = 0.6 + rnd() * 0.5;
+    p.maxY = G.ceilY + 8 + rnd() * 28;
+    p.g.scale.set(p.scale);
+    return p;
+  }
+
+  // ============================================================
+  //  MINER BUILDER
+  // ============================================================
+  function buildMiner(z, agent, mx, fy, idx, S) {
+    const c = new PIXI.Container();
+    c.sortableChildren = true;
+    c.scale.set(S);
+
+    const skin = 0xd9a87a;
+    const helm = z.helmet, outfit = z.outfit;
+    const outfitDk = darken(outfit, 0.65), helmDk = darken(helm, 0.7);
+
+    // ----- shadow (lives in zone container, on floor) -----
+    const shadow = new PIXI.Graphics();
+    shadow.beginFill(0x000000, 0.38).drawEllipse(0, 0, 26, 7).endFill();
+    shadow.x = mx; shadow.y = fy + 1;
+
+    // ----- LEGS -----
+    function legGfx() {
+      const g = new PIXI.Graphics();
+      g.beginFill(outfitDk).drawRoundedRect(-5, 0, 10, 26, 3).endFill();
+      g.beginFill(0x2a2018).drawRoundedRect(-6, 24, 13, 7, 2).endFill(); // boot
+      g.pivot.set(0, 0);
+      return g;
+    }
+    const legL = legGfx(), legR = legGfx();
+    legL.x = -6; legR.x = 6; legL.y = -32; legR.y = -32;
+    legL.zIndex = 1; legR.zIndex = 1;
+
+    // ----- TORSO -----
+    const torso = new PIXI.Container();
+    torso.y = -32; torso.zIndex = 3;
+    const tg = new PIXI.Graphics();
+    tg.beginFill(outfit).drawRoundedRect(-13, -34, 26, 36, 6).endFill();
+    tg.beginFill(brighten(outfit, 1.25), 0.5).drawRoundedRect(-13, -34, 26, 8, 4).endFill(); // top-lit
+    tg.beginFill(outfitDk).drawRoundedRect(-13, -6, 26, 8, 3).endFill(); // belt
+    tg.beginFill(z.accent, 0.85).drawCircle(0, -2, 2.5).endFill(); // buckle
+    // outfit accent stripe
+    tg.beginFill(z.light, 0.4).drawRoundedRect(-11, -30, 4, 26, 2).endFill();
+    torso.addChild(tg);
+
+    // ----- ARMS (shoulder-pivoted) -----
+    function armGfx() {
+      const g = new PIXI.Graphics();
+      g.beginFill(outfit).drawRoundedRect(-4, 0, 8, 22, 3).endFill();
+      g.beginFill(skin).drawCircle(0, 23, 4).endFill(); // hand
+      g.pivot.set(0, 0);
+      return g;
+    }
+    const armBack = armGfx(), armFront = armGfx();
+    armBack.x = -11; armBack.y = -64; armBack.zIndex = 2;   // behind torso
+    armFront.x = 11; armFront.y = -64; armFront.zIndex = 4; // in front
+
+    // ----- TOOL (attached to front hand) -----
+    const tool = buildTool(z);
+    tool.zIndex = 5;
+    armFront.addChild(tool);
+    tool.x = 0; tool.y = 23;
+
+    // ----- carried gem (Ops miners pick up & place) -----
+    let carry = null;
+    if (z.key === "ops") {
+      carry = new PIXI.Graphics();
+      carry.beginFill(z.accent).lineStyle(1, 0xffffff, 0.6).drawPolygon([0, -5, 4, -1, 2, 5, -2, 5, -4, -1]).endFill();
+      carry.x = 0; carry.y = 24; carry.visible = false;
+      armFront.addChild(carry);
+      tool.visible = false; // ops miners use hands, not a wrench, while sorting
+    }
+
+    // ----- HEAD + HELMET -----
+    const head = new PIXI.Container();
+    head.y = -66; head.zIndex = 4;
+    const hg = new PIXI.Graphics();
+    hg.beginFill(skin).drawCircle(0, 0, 9).endFill();
+    hg.beginFill(brighten(skin, 1.2), 0.5).drawCircle(-2, -3, 4).endFill();
+    // eyes
+    hg.beginFill(0x1a120c).drawCircle(2.5, -1, 1.2).endFill();
+    head.addChild(hg);
+    // helmet by zone
+    const hel = new PIXI.Graphics();
+    if (z.key === "intel") {
+      // hood
+      hel.beginFill(outfit).arc(0, -1, 12, Math.PI, 0).lineTo(11, 4).lineTo(-11, 4).closePath().endFill();
+      hel.beginFill(helmDk).drawRect(-12, 2, 24, 4).endFill();
+      hel.beginFill(z.accent, 0.7).drawCircle(8, -2, 1.4).endFill();
+    } else {
+      // hardhat / helmet
+      hel.beginFill(helm).arc(0, 0, 11, Math.PI, 0).endFill();
+      hel.beginFill(helm).drawRoundedRect(-13, -1, 26, 4, 2).endFill();
+      hel.beginFill(brighten(helm, 1.3), 0.7).arc(0, 0, 11, Math.PI, Math.PI * 1.4).lineTo(0, 0).closePath().endFill();
+      // head lamp
+      hel.beginFill(0x111).drawRect(-3, -10, 6, 4).endFill();
+      hel.beginFill(0xfff6c0, 0.95).drawCircle(0, -8, 2).endFill();
+    }
+    hel.y = -7;
+    head.addChild(hel);
+
+    c.addChild(legL, legR, armBack, torso, armFront, head);
+
+    // ----- name label -----
+    const label = new PIXI.Container();
+    // tiny stone-plate backing so the name reads against busy stone
+    const lblBg = new PIXI.Graphics();
+    const nameTxt = new PIXI.Text(agent.id + " " + agent.name, {
+      fontFamily: "Courier New, monospace", fontSize: 10.5, fontWeight: "bold",
+      fill: 0xe9e2d0, dropShadow: true, dropShadowColor: 0x000000, dropShadowBlur: 3, dropShadowDistance: 1,
+    });
+    nameTxt.anchor.set(0.5);
+    const lw = nameTxt.width + 12;
+    lblBg.beginFill(0x0d0a14, 0.78).lineStyle(1, z.light, 0.4)
+         .drawRoundedRect(-lw / 2, -9, lw, 18, 5).endFill();
+    const errTxt = new PIXI.Text("⚠ ERROR", {
+      fontFamily: "Courier New, monospace", fontSize: 11, fontWeight: "bold", fill: 0xff5b5b,
+      dropShadow: true, dropShadowColor: 0x000000, dropShadowBlur: 4, dropShadowDistance: 1,
+    });
+    errTxt.anchor.set(0.5); errTxt.y = 16; errTxt.visible = false;
+    label.addChild(lblBg, nameTxt, errTxt);
+    // stagger adjacent labels vertically so names never collide in narrow zones
+    label.y = -116 - ((idx % 2) === 0 ? 16 : 0); label.zIndex = 10;
+    label.scale.set(1 / S); // keep label readable regardless of miner scale
+    c.addChild(label);
+
+    // ----- skull (error) -----
+    const skull = new PIXI.Text("💀", { fontSize: 30 });
+    skull.anchor.set(0.5); skull.visible = false; skull.zIndex = 11; skull.alpha = 0;
+    c.addChild(skull);
+
+    // interactivity
+    c.eventMode = "static"; c.cursor = "pointer";
+    c.hitArea = new PIXI.Rectangle(-22, -120, 44, 124);
+
+    const m = {
+      id: agent.id, name: agent.name, zone: z, container: c, shadow,
+      parts: { legL, legR, torso, armBack, armFront, head, tool, hel, carry },
+      label, nameTxt, errTxt, skull,
+      status: "idle", clock: rnd() * 10 + idx, S,
+      facing: 1, minerIdx: idx,
+      // base pose for resets
+      base: {
+        legLx: legL.x, legRx: legR.x, legLy: legL.y, legRy: legR.y,
+        torsoY: torso.y, headY: head.y, headX: 0,
+        armBackRot: 0, armFrontRot: 0, torsoRot: 0,
+      },
+      aura: null, auraGlow: null,
+      err: null,
+      pulseTimer: 0,
+    };
+
+    c.on("pointertap", (e) => { e.stopPropagation(); openPopup(m); });
+    return m;
+  }
+
+  // Tools are gripped at the hand (origin) and extend along +y AWAY from the body,
+  // so the working head/tip is at the FAR end and leads into the wall on a swing.
+  function buildTool(z) {
+    const g = new PIXI.Graphics();
+    if (z.tool === "pickaxe") {
+      // handle from grip outward to the far end
+      g.beginFill(0x5a3a1e).drawRoundedRect(-2, -6, 4, 34, 2).endFill();
+      g.beginFill(0x6a4626, 0.7).drawRect(-2, -6, 1.6, 34).endFill();
+      // pick head mounted at the FAR end (y=27): forward point + back spike
+      const hy = 27;
+      g.beginFill(0x9aa3ad).drawPolygon([0, hy - 5, 17, hy - 1, 17, hy + 1, 0, hy + 4]).endFill(); // forward point
+      g.beginFill(0x808a94).drawPolygon([0, hy - 4, -13, hy - 1, -13, hy + 1, 0, hy + 3]).endFill(); // back spike
+      g.beginFill(0xc4ccd4, 0.6).drawPolygon([0, hy - 5, 17, hy - 1, 4, hy - 1]).endFill();           // highlight
+    } else if (z.tool === "chisel") {
+      // hammer-end at grip, chisel tip at far end pointing into the wall
+      g.beginFill(0x3a2a1c).drawRoundedRect(-2, -2, 4, 16, 2).endFill();
+      g.beginFill(0xb8c0c8).drawRoundedRect(-3, 14, 6, 9, 1).endFill();
+      g.beginFill(0xe0e6ec).drawPolygon([-3, 23, 3, 23, 0, 28]).endFill();
+    } else if (z.tool === "wrench") {
+      g.beginFill(0x8a929c).drawRoundedRect(-2.5, -4, 5, 26, 2).endFill();
+      g.lineStyle(3, 0x8a929c).drawCircle(0, 24, 5).lineStyle(0);     // jaws at far end
+      g.beginFill(0x10160f).drawCircle(0, 24, 2).endFill();
+      g.beginFill(0xaab2bc, 0.6).drawRect(-2.5, -4, 2, 26).endFill();
+    } else {
+      // lantern staff with glowing orb at the far end (toward the crystal)
+      g.beginFill(0x3a2c52).drawRoundedRect(-2, -6, 4, 38, 2).endFill();
+      const orb = new PIXI.Sprite(softCircleTexture());
+      orb.anchor.set(0.5); orb.tint = z.accent; orb.width = orb.height = 20;
+      orb.blendMode = PIXI.BLEND_MODES.ADD; orb.y = 32;
+      g.addChild(orb);
+      g.beginFill(z.accent, 0.9).drawCircle(0, 32, 4).endFill();
+      g._orb = orb;
+    }
+    return g;
+  }
+
+  // ============================================================
+  //  COLOR UTILS
+  // ============================================================
+  function darken(c, f) {
+    return ((((c >> 16) & 255) * f) << 16) | ((((c >> 8) & 255) * f | 0) << 8) | (((c & 255) * f) | 0);
+  }
+  function brighten(c, f) {
+    const r = Math.min(255, ((c >> 16) & 255) * f), g = Math.min(255, ((c >> 8) & 255) * f), b = Math.min(255, (c & 255) * f);
+    return (r << 16) | (g << 8) | b;
+  }
+
+  // ============================================================
+  //  STATUS / STATE MACHINE
+  // ============================================================
+  function applyStatus(m, status, animate) {
+    agentStatus[m.id] = status;
+    if (status === "error") {
+      if (animate) startDeath(m);
+      else setDeadInstant(m);
+    } else {
+      // idle or running — clear any error visuals
+      clearError(m);
+      m.status = status;
+    }
+    refreshChip(m.id);
+    if (popupMiner === m) updatePopupContent(m);
+  }
+
+  function clearError(m) {
+    m.err = null;
+    m.skull.visible = false; m.skull.alpha = 0;
+    m.errTxt.visible = false;
+    m.nameTxt.style.fill = 0xe9e2d0;
+    resetPose(m);
+    if (m.aura) { m.aura.visible = false; }
+  }
+
+  function resetPose(m) {
+    const p = m.parts, b = m.base;
+    p.legL.x = b.legLx; p.legR.x = b.legRx; p.legL.y = b.legLy; p.legR.y = b.legRy;
+    p.legL.rotation = 0; p.legR.rotation = 0;
+    p.torso.y = b.torsoY; p.torso.rotation = 0; p.torso.x = 0;
+    p.head.y = b.headY; p.head.x = 0; p.head.rotation = 0;
+    p.armBack.rotation = 0; p.armFront.rotation = 0;
+    m.container.rotation = 0; m.container.alpha = 1;
+  }
+
+  function startDeath(m) {
+    m.status = "error";
+    m.err = { t: 0, flashed: false };
+    // dramatic white flash (1 frame)
+    flashAlpha = 0.85;
+    shake.t = 0.4; shake.mag = 8;
+    m.errTxt.visible = true;
+    m.nameTxt.style.fill = 0xff5b5b;
+    if (m.aura) m.aura.visible = false;
+    // notify parent React app
+    try { window.plutusAlert && window.plutusAlert(m.id, m.name); } catch (e) {}
+  }
+
+  function setDeadInstant(m) {
+    m.status = "error";
+    m.err = { t: 99, flashed: true };
+    // final dead pose
+    deathPose(m, 1);
+    m.skull.visible = true; m.skull.alpha = 1;
+    m.skull.x = 0; m.skull.y = -96;
+    m.errTxt.visible = true;
+    m.nameTxt.style.fill = 0xff5b5b;
+  }
+
+  // place miner into the "face down on ground" pose; k=0 standing → 1 fully down
+  function deathPose(m, k) {
+    const p = m.parts, b = m.base;
+    const e = easeIn(k);
+    m.container.rotation = 0;
+    p.torso.rotation = e * 1.45;          // tip forward face-down
+    p.torso.y = b.torsoY + e * 26;
+    p.torso.x = e * 10;
+    p.head.rotation = e * 1.2;
+    p.head.y = b.headY + e * 10;
+    p.head.x = e * 6;
+    p.armFront.rotation = e * 1.6;
+    p.armBack.rotation = -e * 1.2;
+    p.legL.rotation = e * 0.9; p.legR.rotation = e * 0.7;
+    p.legL.y = b.legLy + e * 4; p.legR.y = b.legRy + e * 4;
+    m.container.alpha = 1;
+  }
+
+  // ============================================================
+  //  PER-FRAME MINER ANIMATION
+  // ============================================================
+  function updateMiner(m, dt) {
+    if (m.status === "error") { updateError(m, dt); return; }
+
+    const speed = m.status === "running" ? 1.8 : 1.0;
+    m.clock += dt * 0.001 * speed;
+    resetPose(m);
+    animateZone(m, m.clock, speed);
+
+    // running extras
+    if (m.status === "running") {
+      ensureAura(m);
+      m.aura.visible = true;
+      m.auraGlow.alpha = 0.32 + Math.sin(time * 0.012 + m.clock) * 0.12;
+      m.auraGlow.scale.set(1 + Math.sin(time * 0.01) * 0.06);
+      // sweat + sparkle spawn
+      m._spawnT = (m._spawnT || 0) + dt;
+      if (m._spawnT > 90) {
+        m._spawnT = 0;
+        spawnSparkle(m);
+        if (rnd() > 0.5) spawnSweat(m);
+      }
+      m.nameTxt.alpha = 1;
+      m.nameTxt.style.fill = 0xffffff;
+    } else {
+      if (m.aura) m.aura.visible = false;
+      m.nameTxt.alpha = 0.82;
+      m.nameTxt.style.fill = 0xe9e2d0;
+    }
+  }
+
+  function animateZone(m, t, speed) {
+    const p = m.parts, b = m.base, key = m.zone.key;
+    const energy = m.status === "running" ? 1.2 : 1.0;
+    // default: anchored at home (branches that pace will override)
+    m.container.x = m._homeX;
+    m.shadow.x = m._homeLocalX;
+
+    if (key === "revenue") {
+      // FULL pickaxe swing: wind up overhead, drive down into the right ore wall, recoil
+      const swing = Math.sin(t * 3.0);
+      const sd = (swing + 1) / 2;                 // 0 = raised overhead, 1 = struck down
+      p.armFront.rotation = -2.45 + sd * 2.05;    // up-right (raised) → down-right (strike)
+      p.armBack.rotation = -0.5 + sd * 0.45;
+      p.torso.rotation = 0.04 + sd * 0.26 * energy;  // lean into the strike
+      p.torso.y = b.torsoY + sd * 3;
+      p.head.rotation = 0.06 + sd * 0.16;
+      p.legL.rotation = sd * 0.10; p.legR.rotation = -sd * 0.06;
+      // impact: fire once each time the swing peaks (pick meets wall)
+      const sIdx = Math.floor((t * 3.0 - Math.PI / 2) / (Math.PI * 2));
+      if (m._swingIdx === undefined) m._swingIdx = sIdx;
+      else if (sIdx > m._swingIdx) { m._swingIdx = sIdx; spawnImpact(m); }
+    } else if (key === "content") {
+      // writing arc on the wall tablet, head examines, occasional step back
+      const wr = Math.sin(t * 4.6);
+      const slow = Math.sin(t * 0.45);
+      const back = Math.max(0, -slow - 0.55) * 2.2;  // occasionally steps back to inspect
+      p.armFront.rotation = -1.75 + wr * 0.32 + back * 1.25;  // small strokes; drops when stepping back
+      p.armBack.rotation = -0.2 - back * 0.1;
+      p.torso.rotation = -0.04 - back * 0.05;
+      p.head.rotation = 0.06 + Math.sin(t * 0.95) * 0.2;      // tilt to examine
+      p.head.x = Math.sin(t * 0.95) * 1.3;
+      m.container.x = m._homeX - back * 16;
+      m.shadow.x = m._homeLocalX - back * 16;
+      p.legL.rotation = back * 0.12; p.legR.rotation = -back * 0.12;
+    } else if (key === "ops") {
+      // pace the belt; bend to pick a gem off it, lift, place it in the cart
+      const cyc = ((t * 0.55) % 1 + 1) % 1;        // one pick→place per cycle
+      const k = cyc < 0.5 ? easeInOut(cyc / 0.5) : easeInOut((1 - cyc) / 0.5); // 0 up, 1 bent to belt
+      const pace = Math.sin(t * 0.7);
+      m.container.x = m._homeX + pace * 11;
+      m.shadow.x = m._homeLocalX + pace * 11;
+      p.legL.rotation = Math.sin(t * 0.7) * 0.22;
+      p.legR.rotation = -Math.sin(t * 0.7) * 0.22;
+      p.torso.rotation = 0.1 + k * 0.32;           // bend over belt
+      p.torso.y = b.torsoY + k * 6;
+      p.head.rotation = 0.16 + k * 0.18;
+      p.armFront.rotation = -0.35 + k * 1.3;       // reach down to belt / lift up
+      p.armBack.rotation = -0.1 + k * 0.5;
+      if (p.carry) p.carry.visible = cyc >= 0.5;   // holding the gem on the way up
+      // register a placed gem once per cycle (cart fills)
+      if (m._opsCyc !== undefined && cyc < m._opsCyc) {
+        const conv = conveyors.find(c => c.z === m.zone);
+        if (conv) conv.level = Math.min(1, conv.level + 0.06);
+      }
+      m._opsCyc = cyc;
+    } else {
+      // intel: hunched, both arms extended toward the floor crystal, slow sway, energy pulses
+      const sway = Math.sin(t * 1.1);
+      p.torso.rotation = 0.16 + sway * 0.04;       // hunched forward
+      p.torso.y = b.torsoY + 4;
+      p.head.rotation = 0.3 + sway * 0.03;
+      p.armFront.rotation = -0.95 + sway * 0.12;   // reach toward crystal (front-right)
+      p.armBack.rotation = -0.72 + sway * 0.12;
+      if (p.tool._orb) {
+        const pulse = 0.7 + (Math.sin(t * 3.4) * 0.5 + 0.5) * 0.9 * energy;
+        p.tool._orb.scale.set(pulse);
+        p.tool._orb.alpha = 0.7 + Math.sin(t * 3.4) * 0.3;
+      }
+      // emit energy motes from the hand toward the crystal
+      m._beamT = (m._beamT || 0) + 16 * energy;
+      if (m._beamT > 110) { m._beamT = 0; spawnEnergyMote(m); }
+    }
+    // gentle idle breathing on every miner
+    p.torso.y += Math.sin(t * 1.6) * 0.7;
+  }
+
+  // ============================================================
+  //  IMPACT SPARKS / DUST  (Revenue pickaxe strikes)
+  // ============================================================
+  function spawnImpact(m) {
+    if (impactParticles.length > 90) return;
+    const gp = m.container.getGlobalPosition();
+    const ix = gp.x + 30 * m.S, iy = gp.y - 34 * m.S;   // at the ore wall to the right
+    const n = 5 + ((rnd() * 3) | 0);
+    for (let i = 0; i < n; i++) {
+      const spark = rnd() > 0.4;
+      const s = new PIXI.Sprite(softCircleTexture());
+      s.anchor.set(0.5); s.blendMode = PIXI.BLEND_MODES.ADD;
+      s.tint = spark ? (rnd() > 0.5 ? 0xffd24a : 0xfff2c0) : 0x8a7a5a;
+      s.width = s.height = spark ? 3 + rnd() * 3 : 4 + rnd() * 5;
+      s.x = ix; s.y = iy;
+      layerLight.addChild(s);
+      const ang = (-Math.PI * 0.5) + (rnd() - 0.5) * (spark ? 2.4 : 1.6);
+      const spd = spark ? 1.4 + rnd() * 1.8 : 0.4 + rnd() * 0.7;
+      impactParticles.push({
+        s, vx: Math.cos(ang) * spd + 0.6, vy: Math.sin(ang) * spd,
+        grav: spark ? 0.06 : 0.015, life: 0, max: spark ? 360 + rnd() * 200 : 600 + rnd() * 300,
+      });
+    }
+  }
+  function updateImpacts(dt) {
+    for (let i = impactParticles.length - 1; i >= 0; i--) {
+      const p = impactParticles[i]; p.life += dt;
+      p.s.x += p.vx * dt * 0.06; p.s.y += p.vy * dt * 0.06; p.vy += p.grav;
+      p.s.alpha = 1 - p.life / p.max;
+      if (p.life >= p.max) { p.s.destroy(); impactParticles.splice(i, 1); }
+    }
+  }
+
+  // ============================================================
+  //  INTEL ENERGY MOTES (hand → crystal)
+  // ============================================================
+  function spawnEnergyMote(m) {
+    if (energyBeams.length > 80) return;
+    const z = m.zone, cr = z._crystals && z._crystals[m.minerIdx];
+    if (!cr) return;
+    const gp = m.container.getGlobalPosition();
+    const hx = gp.x + 16 * m.S, hy = gp.y - 56 * m.S;          // approx front hand
+    const tx = z.geom.zx + cr.localX, ty = z.geom.zy + cr.localY;
+    const s = new PIXI.Sprite(softCircleTexture());
+    s.anchor.set(0.5); s.blendMode = PIXI.BLEND_MODES.ADD;
+    s.tint = z.accent; s.width = s.height = 5 + rnd() * 4;
+    s.x = hx; s.y = hy;
+    layerLight.addChild(s);
+    energyBeams.push({ s, x: hx, y: hy, tx, ty, life: 0, max: 520 + rnd() * 160, cr });
+  }
+  function updateEnergy(dt) {
+    for (let i = energyBeams.length - 1; i >= 0; i--) {
+      const p = energyBeams[i]; p.life += dt;
+      const k = p.life / p.max;
+      p.s.x = p.x + (p.tx - p.x) * easeIn(k) + Math.sin(k * 9) * 3;
+      p.s.y = p.y + (p.ty - p.y) * easeIn(k);
+      p.s.alpha = k < 0.85 ? 0.9 : (1 - k) / 0.15 * 0.9;
+      if (p.life >= p.max) {
+        if (p.cr && p.cr.glow) p.cr.glow.alpha = Math.min(0.85, p.cr.glow.alpha + 0.08); // crystal flares
+        p.s.destroy(); energyBeams.splice(i, 1);
+      }
+    }
+  }
+
+  // ============================================================
+  //  CONVEYOR UPDATE  (Ops)
+  // ============================================================
+  function updateConveyors(dt) {
+    const d = dt * 0.06;
+    conveyors.forEach(conv => {
+      conv.scroll = (conv.scroll + conv.speed * d * 14) % 14;
+      // redraw moving diagonal stripes
+      const g = conv.stripes; g.clear();
+      g.beginFill(0x10160f).drawRect(conv.beltX + 6, conv.beltY, conv.beltW - 12, conv.beltH).endFill();
+      for (let x = -14 + conv.scroll; x < conv.beltW; x += 14) {
+        g.beginFill(0x2c3a30, 0.9)
+          .drawPolygon([
+            conv.beltX + 6 + x, conv.beltY,
+            conv.beltX + 6 + x + 6, conv.beltY,
+            conv.beltX + 6 + x - conv.beltH + 6, conv.beltY + conv.beltH,
+            conv.beltX + 6 + x - conv.beltH, conv.beltY + conv.beltH,
+          ]).endFill();
+      }
+      g.beginFill(0x000000, 0.3).drawRect(conv.beltX + 6, conv.beltY, conv.beltW - 12, 2).endFill();
+      // spawn gems onto the belt
+      conv.gemTimer -= dt;
+      if (conv.gemTimer <= 0 && conv.gems.length < 6) {
+        conv.gemTimer = 900 + rnd() * 900;
+        conv.gems.push({ g: makeBeltGem(conv), x: conv.beltX + 12 });
+      }
+      // move gems toward the cart
+      const endX = conv.beltX + conv.beltW - 16;
+      for (let i = conv.gems.length - 1; i >= 0; i--) {
+        const gem = conv.gems[i];
+        gem.x += conv.speed * d * 22;
+        gem.g.x = gem.x;
+        gem.g.y = conv.beltY - 2 + Math.sin(gem.x * 0.3) * 1;
+        gem.g.rotation = gem.x * 0.02;
+        if (gem.x >= endX) {                 // dropped into the cart
+          gem.g.destroy(); conv.gems.splice(i, 1);
+          conv.level = Math.min(1, conv.level + 0.08);
+        }
+      }
+      // draw cart fill (drains slowly so it never stays full)
+      conv.level = Math.max(0, conv.level - 0.00004 * dt);
+      const cf = conv.cartFill; cf.clear();
+      const fh = (conv.cartH - 8) * conv.level;
+      cf.beginFill(conv.z.accent, 0.85).drawRect(4, -4 - fh, conv.cartW - 8, fh).endFill();
+      cf.beginFill(0xffffff, 0.2).drawRect(4, -4 - fh, conv.cartW - 8, Math.min(3, fh)).endFill();
+    });
+  }
+
+  function updateError(m, dt) {
+    if (!m.err) return;
+    m.err.t += dt * 0.001;
+    const t = m.err.t;
+
+    // timeline (seconds)
+    //  0.0 - 0.4  : screen shake (handled globally) + flash
+    //  0.0 - 0.4  : initial buckle
+    //  0.4 - 1.2  : stagger (stumble left/right, slow-mo)
+    //  1.2 - 2.4  : fall to face-down (slow-mo)
+    //  2.4 - 3.9  : skull rises with red trail
+    //  > 3.9      : dead hold + red pulse every 3s
+    resetPose(m);
+
+    if (t < 0.4) {
+      const wob = Math.sin(t * 22) * (1 - t / 0.4) * 0.12;
+      m.parts.torso.rotation = wob;
+      m.container.x = m._homeX + Math.sin(t * 26) * 5 * (1 - t / 0.4);
+    } else if (t < 1.2) {
+      // stagger — slow exaggerated stumble
+      const k = (t - 0.4) / 0.8;
+      const wob = Math.sin(k * Math.PI * 2.5) * (0.18 + k * 0.12);
+      m.parts.torso.rotation = wob;
+      m.parts.head.rotation = wob * 1.3;
+      m.parts.legL.rotation = wob * 0.6; m.parts.legR.rotation = -wob * 0.6;
+      m.container.x = m._homeX + Math.sin(k * Math.PI * 3) * 9;
+      m.parts.armFront.rotation = -0.5 + wob * 1.5;
+      m.parts.armBack.rotation = 0.5 - wob * 1.5;
+    } else if (t < 2.4) {
+      // fall — slow motion collapse to face down
+      const k = (t - 1.2) / 1.2;
+      deathPose(m, k);
+      m.container.x = m._homeX;
+    } else {
+      // landed; hold dead pose
+      deathPose(m, 1);
+      m.container.x = m._homeX;
+      // skull rise (2.4 -> 3.9)
+      if (t < 3.9) {
+        const k = (t - 2.4) / 1.5;
+        m.skull.visible = true;
+        m.skull.alpha = Math.min(1, k * 1.6);
+        m.skull.x = 6;
+        m.skull.y = -34 - easeOut(k) * 62;   // rises from body to ~ -96
+        // red trail
+        m._trailT = (m._trailT || 0) + dt;
+        if (m._trailT > 70) { m._trailT = 0; spawnTrail(m); }
+      } else {
+        m.skull.visible = true; m.skull.alpha = 1;
+        m.skull.x = 6; m.skull.y = -96;
+        m.skull.scale.set(1 + Math.sin(time * 0.004) * 0.05); // gentle float bob already via sin
+        m.skull.y = -96 + Math.sin(time * 0.003) * 3;
+        // red error pulse every 3s
+        m.pulseTimer += dt;
+        if (m.pulseTimer > 3000) { m.pulseTimer = 0; spawnPulse(m); }
+      }
+    }
+    m.errTxt.visible = true;
+  }
+
+  // ============================================================
+  //  RUNNING AURA
+  // ============================================================
+  function ensureAura(m) {
+    if (m.aura) return;
+    const aura = new PIXI.Container();
+    aura.zIndex = 0;
+    const glow = new PIXI.Sprite(radialGlowTexture(0xffe7a0, "aura"));
+    glow.anchor.set(0.5); glow.width = glow.height = 130; glow.y = -50;
+    glow.blendMode = PIXI.BLEND_MODES.ADD; glow.alpha = 0.3;
+    aura.addChild(glow);
+    m.container.addChildAt(aura, 0);
+    m.aura = aura; m.auraGlow = glow;
+  }
+
+  // ============================================================
+  //  FX PARTICLE POOLS (sparkles / sweat / pulse / trail)
+  // ============================================================
+  const fxLayer = new PIXI.Container();
+  layerNear.addChild(fxLayer);
+
+  function spawnSparkle(m) {
+    if (sparkles.length > 120) return;
+    const s = new PIXI.Sprite(softCircleTexture());
+    s.anchor.set(0.5); s.blendMode = PIXI.BLEND_MODES.ADD;
+    s.tint = rnd() > 0.5 ? 0xffe7a0 : 0xffffff;
+    s.width = s.height = 4 + rnd() * 5;
+    const gp = m.container.getGlobalPosition();
+    s.x = gp.x + (rnd() - 0.5) * 50; s.y = gp.y - 30 - rnd() * 60;
+    layerLight.addChild(s);
+    sparkles.push({ s, vx: (rnd() - 0.5) * 0.4, vy: -0.5 - rnd() * 0.8, life: 0, max: 600 + rnd() * 400 });
+  }
+  function spawnSweat(m) {
+    const g = new PIXI.Graphics();
+    g.beginFill(0xbfe0ff, 0.9).drawEllipse(0, 0, 2, 3).endFill();
+    const gp = m.container.getGlobalPosition();
+    g.x = gp.x + (rnd() > 0.5 ? 14 : -14); g.y = gp.y - 100;
+    fxLayer.addChild(g);
+    sparkles.push({ s: g, sweat: true, vx: (rnd() > 0.5 ? 1 : -1) * (0.6 + rnd()), vy: -0.4, grav: 0.02, life: 0, max: 700 });
+  }
+  function spawnTrail(m) {
+    const s = new PIXI.Sprite(softCircleTexture());
+    s.anchor.set(0.5); s.blendMode = PIXI.BLEND_MODES.ADD;
+    s.tint = 0xff3b3b; s.width = s.height = 6 + rnd() * 6;
+    const gp = m.container.getGlobalPosition();
+    s.x = gp.x + m.skull.x * m.S + (rnd() - 0.5) * 8;
+    s.y = gp.y + m.skull.y * m.S;
+    layerLight.addChild(s);
+    trailParticles.push({ s, vy: 0.3 + rnd() * 0.3, vx: (rnd() - 0.5) * 0.3, life: 0, max: 900 });
+  }
+  function spawnPulse(m) {
+    const g = new PIXI.Graphics();
+    g.lineStyle(3, 0xff3b3b, 0.9).drawCircle(0, 0, 10);
+    const gp = m.container.getGlobalPosition();
+    g.x = gp.x; g.y = gp.y - 20;
+    g.blendMode = PIXI.BLEND_MODES.ADD;
+    layerLight.addChild(g);
+    pulseRings.push({ g, life: 0, max: 1100 });
+  }
+
+  function updateFx(dt) {
+    // sparkles & sweat
+    for (let i = sparkles.length - 1; i >= 0; i--) {
+      const p = sparkles[i]; p.life += dt;
+      p.s.x += p.vx * dt * 0.06; p.s.y += p.vy * dt * 0.06;
+      if (p.grav) p.vy += p.grav;
+      p.s.alpha = 1 - p.life / p.max;
+      if (p.life >= p.max) { p.s.destroy(); sparkles.splice(i, 1); }
+    }
+    // trail
+    for (let i = trailParticles.length - 1; i >= 0; i--) {
+      const p = trailParticles[i]; p.life += dt;
+      p.s.x += p.vx * dt * 0.06; p.s.y += p.vy * dt * 0.06;
+      p.s.alpha = (1 - p.life / p.max) * 0.8;
+      p.s.scale.set(1 - p.life / p.max * 0.5);
+      if (p.life >= p.max) { p.s.destroy(); trailParticles.splice(i, 1); }
+    }
+    // pulse rings
+    for (let i = pulseRings.length - 1; i >= 0; i--) {
+      const p = pulseRings[i]; p.life += dt;
+      const k = p.life / p.max;
+      p.g.scale.set(1 + k * 7);
+      p.g.alpha = (1 - k) * 0.9;
+      if (p.life >= p.max) { p.g.destroy(); pulseRings.splice(i, 1); }
+    }
+  }
+
+  // ============================================================
+  //  AMBIENT PARTICLE UPDATE
+  // ============================================================
+  function updateParticles(dt) {
+    const d = dt * 0.06;
+    zoneParticles.forEach(zp => {
+      zp.pool.forEach(p => {
+        p.y -= p.vy * d * 6;
+        p.sway += 0.02 * d;
+        p.x += p.vx * d * 6 + Math.sin(p.sway) * p.swayAmp * 0.4;
+        p.rot += p.vrot * d * 6;
+        p.g.x = p.x; p.g.y = p.y; p.g.rotation = p.rot;
+        // fade near top
+        const fadeStart = p.geom.ceilY + 70;
+        p.g.alpha = p.y > fadeStart ? 1 : Math.max(0, (p.y - p.maxY) / (fadeStart - p.maxY));
+        if (p.y < p.maxY) spawnParticle(p, false);
+      });
+    });
+  }
+
+  // ============================================================
+  //  LIGHT FLICKER
+  // ============================================================
+  function updateLights(dt) {
+    torches.forEach(tr => {
+      const t = time * 0.006 + tr.phase;
+      const f = 0.82 + Math.sin(t) * 0.08 + Math.sin(t * 3.3) * 0.05 + (noise1(t * 2) * 0.06);
+      tr.glow.alpha = tr.baseGlow * f;
+      tr.src.alpha = tr.baseSrc * (0.85 + (f - 0.82) * 2);
+      const cs = 1 + (f - 0.82) * 1.6;
+      tr.core.scale.set(cs);
+      tr.core.alpha = 0.8 * f;
+      tr.glow.x = tr.x + Math.sin(t * 5) * 1.5;
+    });
+    // flame particles
+    flameParticles.forEach(f => {
+      f.life += dt * 0.0016;
+      if (f.life > 1) { f.life = 0; f.x = f.base.x + (noise1(f.seed += 1) - 0.5) * 8; f.y = f.base.y; }
+      const k = f.life;
+      f.s.x = f.x + Math.sin((time * 0.01) + f.seed) * 6 * k;
+      f.s.y = f.base.y - k * 34;
+      f.s.alpha = (1 - k) * 0.8;
+      const sz = (14 - k * 9);
+      f.s.width = f.s.height = Math.max(2, sz);
+    });
+  }
+
+  // ============================================================
+  //  MAIN TICKER
+  // ============================================================
+  app.ticker.add(() => {
+    const dt = Math.min(app.ticker.deltaMS, 50);
+    time += dt;
+
+    updateLights(dt);
+    updateParticles(dt);
+    updateConveyors(dt);
+    miners.forEach(m => updateMiner(m, dt));
+    updateFx(dt);
+    updateImpacts(dt);
+    updateEnergy(dt);
+
+    // white flash decay
+    if (flashAlpha > 0) { flashAlpha -= dt * 0.004; if (flashAlpha < 0) flashAlpha = 0; }
+    flash.alpha = flashAlpha;
+
+    // screen shake
+    if (shake.t > 0) {
+      shake.t -= dt * 0.001;
+      const m = shake.mag * (shake.t / 0.4);
+      root.x = (rnd() - 0.5) * m * 2;
+      root.y = (rnd() - 0.5) * m * 2;
+    } else {
+      // parallax ease toward pointer
+      const px = (pointer.x - W / 2) / W;
+      const py = (pointer.y - H / 2) / H;
+      layerFar.x += ((-px * 18) - layerFar.x) * 0.06;
+      layerFar.y += ((-py * 10) - layerFar.y) * 0.06;
+      layerMid.x += ((-px * 38) - layerMid.x) * 0.06;
+      layerMid.y += ((-py * 18) - layerMid.y) * 0.06;
+      root.x += (0 - root.x) * 0.2; root.y += (0 - root.y) * 0.2;
+    }
+
+    updateHUD();
+    if (popupMiner) positionPopup(popupMiner);
+  });
+
+  window.addEventListener("pointermove", e => { pointer.x = e.clientX; pointer.y = e.clientY; });
+
+  // ============================================================
+  //  HUD COUNTS
+  // ============================================================
+  const elMining = document.getElementById("cMining");
+  const elResting = document.getElementById("cResting");
+  const elDown = document.getElementById("cDown");
+  function updateHUD() {
+    let mining = 0, resting = 0, down = 0;
+    for (const id in agentStatus) {
+      if (agentStatus[id] === "running") mining++;
+      else if (agentStatus[id] === "error") down++;
+      else resting++;
+    }
+    elMining.textContent = mining; elResting.textContent = resting; elDown.textContent = down;
+    elDown.parentElement.classList.toggle("down-active", down > 0);
+  }
+
+  // ============================================================
+  //  DEMO PANEL
+  // ============================================================
+  const demoRow = document.getElementById("demoRow");
+  const chipEls = {};
+  function buildDemoPanel() {
+    demoRow.innerHTML = "";
+    for (const k in chipEls) delete chipEls[k];
+    ZONES.forEach(z => z.agents.forEach(a => {
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.innerHTML = `<span class="sdot"></span><span class="aid">${a.id}</span><span class="cname">${a.name}</span>`;
+      chip.onclick = () => cycleStatus(a.id);
+      demoRow.appendChild(chip);
+      chipEls[a.id] = chip;
+      refreshChip(a.id);
+    }));
+  }
+  function refreshChip(id) {
+    const chip = chipEls[id]; if (!chip) return;
+    const st = agentStatus[id];
+    chip.querySelector(".sdot").style.color = STATUS_HEX[st];
+    chip.querySelector(".cname").className = "cname st-" + st;
+  }
+  function cycleStatus(id) {
+    const order = { idle: "running", running: "error", error: "idle" };
+    const next = order[agentStatus[id]];
+    window.setAgentStatus(id, next);
+  }
+
+  // ============================================================
+  //  POPUP CARD
+  // ============================================================
+  const popup = document.getElementById("popup");
+  const reviveBtn = document.getElementById("reviveBtn");
+  let popupMiner = null;
+
+  function openPopup(m) {
+    popupMiner = m;
+    updatePopupContent(m);
+    popup.style.display = "block";
+    positionPopup(m);
+  }
+  function updatePopupContent(m) {
+    const st = agentStatus[m.id];
+    document.getElementById("pId").textContent = m.id;
+    document.getElementById("pName").textContent = m.name;
+    const statusTxt = document.getElementById("pStatus");
+    statusTxt.textContent = st.toUpperCase();
+    statusTxt.style.color = STATUS_HEX[st];
+    document.getElementById("pDot").style.color = STATUS_HEX[st];
+    document.getElementById("pZone").textContent = "⛏ " + m.zone.name;
+    reviveBtn.style.display = st === "error" ? "block" : "none";
+  }
+  function positionPopup(m) {
+    const gp = m.container.getGlobalPosition();
+    const rect = app.view.getBoundingClientRect();
+    const scaleX = rect.width / app.screen.width, scaleY = rect.height / app.screen.height;
+    popup.style.left = (rect.left + gp.x * scaleX) + "px";
+    popup.style.top = (rect.top + (gp.y - 132 * m.S) * scaleY) + "px";
+  }
+  reviveBtn.onclick = (e) => {
+    e.stopPropagation();
+    if (popupMiner) {
+      window.setAgentStatus(popupMiner.id, "idle");
+      updatePopupContent(popupMiner);
+    }
+  };
+  popup.addEventListener("pointerdown", e => e.stopPropagation());
+  // dismiss popup on outside click
+  window.addEventListener("pointerdown", () => { popup.style.display = "none"; popupMiner = null; });
+  app.view.addEventListener && app.stage; // (stage tap handled below)
+  app.stage.eventMode = "static";
+  app.stage.hitArea = new PIXI.Rectangle(0, 0, 100000, 100000);
+  app.stage.on("pointertap", () => { popup.style.display = "none"; popupMiner = null; });
+
+  // ============================================================
+  //  GLOBAL API for React parent
+  // ============================================================
+  window.setAgentStatus = function (id, status) {
+    if (!(id in agentStatus)) return;
+    if (!["idle", "running", "error"].includes(status)) return;
+    const m = miners.find(mm => mm.id === id);
+    const wasError = agentStatus[id] === "error";
+    if (m) {
+      // animate the death only on a fresh transition into error
+      applyStatus(m, status, status === "error" && !wasError);
+    } else {
+      agentStatus[id] = status;
+    }
+    refreshChip(id);
+  };
+  // Default no-op; React parent overrides this listener.
+  if (!window.plutusAlert) {
+    window.plutusAlert = function (id, name) {
+      console.log("[plutusAlert] Agent DOWN:", id, name);
+    };
+  }
+  // expose for convenience
+  window.plutusMine = {
+    miners: () => miners, status: () => ({ ...agentStatus }), rebuild: build,
+    app, conveyors: () => conveyors,
+    tick: (n) => { for (let i = 0; i < (n || 1); i++) app.ticker.update(performance.now() + i * 16); },
+  };
+
+  // ============================================================
+  //  BACK BUTTON
+  // ============================================================
+  document.getElementById("backBtn").onclick = () => {
+    if (window.plutusNavigateBack) window.plutusNavigateBack();
+    else if (window.parent !== window) window.parent.postMessage({ type: "plutus-nav", page: 1 }, "*");
+    else console.log("[Plutus] navigate back to page 1");
+  };
+
+  // ============================================================
+  //  BOOT + RESIZE
+  // ============================================================
+  function boot() {
+    // store home X for ops pacing & error reset (after build assigns container.x)
+    build();
+    miners.forEach(m => { m._homeX = m.container.x; });
+    document.getElementById("loading").style.display = "none";
+  }
+
+  let resizeT;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => {
+      build();
+      miners.forEach(m => { m._homeX = m.container.x; });
+      if (popupMiner) { popupMiner = null; popup.style.display = "none"; }
+    }, 180);
+  });
+
+  // wait one tick for renderer sizing
+  setTimeout(boot, 30);
+
+})();
+</script>
+</body>
+</html>
