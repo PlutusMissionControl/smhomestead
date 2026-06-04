@@ -232,24 +232,15 @@ img { max-width: 100%; display: block; }
 
 /* ---------- Pillar cards ---------- */
 .pillars {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 0.8rem;
-  align-items: stretch;
-}
-.pillar {
-  flex: 1 1 0;
-  min-width: 0;
-}
-@media (max-width: 980px) {
-  .pillars { flex-wrap: wrap; }
-  .pillar { flex: 1 1 calc(33% - 0.8rem); }
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.2rem;
 }
 @media (max-width: 640px) {
-  .pillar { flex: 1 1 calc(50% - 0.8rem); }
+  .pillars { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 460px) {
-  .pillar { flex: 1 1 100%; }
+  .pillars { grid-template-columns: 1fr; }
 }
 
 /* Pillar card styling */
